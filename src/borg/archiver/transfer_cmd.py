@@ -285,6 +285,8 @@ class TransferMixIn:
             # for 2 -> 2 transfers, because Borg 2 allows duplicate names ("series" feature).
             # So, the best is to check for both name/ts and name/id.
             if not dry_run and manifest.archives.exists_name_and_ts(name, archive_info.ts):
+                # Useful for Borg 1.x -> 2 transfers; we have unique names in Borg 1.x.
+                # Also useful for Borg 2 -> 2 transfers with metadata changes (ID changes).
                 mark("DT_11_true")
                 print(f"{name} {ts_str}: archive is already present in destination repo, skipping.")
             # Useful for Borg 1.x -> 2 transfers; we have unique names in Borg 1.x.
@@ -318,7 +320,7 @@ class TransferMixIn:
                         # code anymore that deals with them in special ways (e.g., to get stats right).
                         mark("DT_15_true")
                         continue
-                     if "chunks_healthy" in item:  # legacy
+                    if "chunks_healthy" in item:  # legacy
                         other_chunks = item.chunks_healthy  # chunks_healthy has the CORRECT chunks list, if present.
                     else:
                         mark("DT_15_false")
