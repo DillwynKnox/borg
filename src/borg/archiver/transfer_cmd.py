@@ -278,11 +278,19 @@ class TransferMixIn:
             id_hex, ts_str = bin_to_hex(id), ts.isoformat()
             transfer_size = 0
             present_size = 0
-
+            # At least for Borg 1.x -> Borg 2 transfers, we cannot use the ID to check for
+            # already transferred archives (due to upgrade of the metadata stream, the ID will be
+            # different anyway). So we use the archive name and timestamp.
+            # The name alone might be sufficient for Borg 1.x -> 2 transfers, but it isn't
+            # for 2 -> 2 transfers, because Borg 2 allows duplicate names ("series" feature).
+            # So, the best is to check for both name/ts and name/id.
             if not dry_run and manifest.archives.exists_name_and_ts(name, archive_info.ts):
                 mark("DT_11_true")
                 print(f"{name} {ts_str}: archive is already present in destination repo, skipping.")
+            # Useful for Borg 1.x -> 2 transfers; we have unique names in Borg 1.x.
+            # Also useful for Borg 2 -> 2 transfers with metadata changes (ID changes).
             elif not dry_run and manifest.archives.exists_name_and_id(name, id):
+                # Useful for Borg 2 -> 2 transfers without changes (ID stays the same)
                 mark("DT_12_true")
                 print(f"{name} {id_hex}: archive is already present in destination repo, skipping.")
             else:
@@ -303,8 +311,15 @@ class TransferMixIn:
                 for item in other_archive.iter_items():
                     is_part = bool(item.get("part", False))
                     if is_part:
+                        # Borg 1.x created part files while checkpointing (in addition to the full
+                        # file in the final archive), like <filename>.borg_part_<part> with item.part >= 1.
+                        # Borg 2 archives do not have such special part items anymore.
+                        # So let's remove them from old archives also, considering there is no
+                        # code anymore that deals with them in special ways (e.g., to get stats right).
                         mark("DT_15_true")
                         continue
+                     if "chunks_healthy" in item:  # legacy
+                        other_chunks = item.chunks_healthy  # chunks_healthy has the CORRECT chunks list, if present.
                     else:
                         mark("DT_15_false")
 
