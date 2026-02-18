@@ -31,6 +31,7 @@ from .. import __version__ as borg_version
 from .. import __version_tuple__ as borg_version_tuple
 from ..constants import *  # NOQA
 from ..platformflags import is_win32
+from borg.helpers.coverage_diy import register
 
 if TYPE_CHECKING:
     from ..item import ItemDiff
@@ -165,6 +166,59 @@ def interval(s):
 
 
 def ChunkerParams(s):
+    CP_BRANCHES = [
+    "CP_01_T_count0",
+    "CP_01_F_count0",
+
+    "CP_02_T_fail_3",
+    "CP_02_F_fail_3",
+
+    "CP_03_T_fixed_2to3",
+    "CP_03_F_fixed_2to3",
+
+    "CP_04_T_count3_header",
+    "CP_04_F_count3_header",
+
+    "CP_05_T_block_lt64",
+    "CP_05_F_block_lt64",
+
+    "CP_06_T_exceed_max",
+    "CP_06_F_exceed_max",
+
+    "CP_07_T_default_1",
+    "CP_07_F_default_1",
+
+    "CP_08_T_buz64_5",
+    "CP_08_F_buz64_5",
+
+    "CP_09_T_mask_range",
+    "CP_09_F_mask_range",
+
+    "CP_10_T_min_lt6",
+    "CP_10_F_min_lt6",
+
+    "CP_11_T_max_gt23",
+    "CP_11_F_max_gt23",
+
+    "CP_12_T_buz_or_compat",
+    "CP_12_F_buz_or_compat",
+
+    "CP_13_T_mask_range2",
+    "CP_13_F_mask_range2",
+
+    "CP_14_T_min_lt6_2",
+    "CP_14_F_min_lt6_2",
+
+    "CP_15_T_max_gt23_2",
+    "CP_15_F_max_gt23_2",
+
+    "CP_16_T_window_even",
+    "CP_16_F_window_even",
+
+    "CP_17_invalid_params",
+    ]
+    for bid in CP_BRANCHES:
+        register(bid)
     params = s.strip().split(",")
     count = len(params)
     if count == 0:
