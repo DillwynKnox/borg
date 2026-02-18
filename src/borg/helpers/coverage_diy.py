@@ -10,11 +10,6 @@ def mark(branch_id: str) -> None:
     """Mark a branch as taken."""
     coverage[branch_id] = True
 
-def reset() -> None:
-    """Reset taken flags but keep known branch IDs."""
-    for k in list(coverage.keys()):
-        coverage[k] = False
-
 def report() -> None:
     print("\n=== DIY COVERAGE REPORT ===")
     taken = [k for k, v in coverage.items() if v]
