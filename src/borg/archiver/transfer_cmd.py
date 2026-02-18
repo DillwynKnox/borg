@@ -134,17 +134,7 @@ class TransferMixIn:
     @with_repository(manifest=True, cache=True, compatibility=(Manifest.Operation.WRITE,))
     def do_transfer(self, args, *, repository, manifest, cache, other_repository=None, other_manifest=None):
         """archives transfer from other repository, optionally upgrade data format"""
-        key = manifest.key
-        other_key = other_manifest.key
-        if not uses_same_id_hash(other_key, key):
-            raise Error(
-                "You must keep the same ID hash ([HMAC-]SHA256 or BLAKE2b) or deduplication will break. "
-                "Use a related repository!"
-            )
-        if not uses_same_chunker_secret(other_key, key):
-            raise Error(
-                "You must use the same chunker secret or deduplication will break. " "Use a related repository!"
-            )
+        self._validate_transfer_compatibility(manifest, other_manifest)
 
         dry_run = args.dry_run
         archive_infos = other_manifest.archives.list_considering(args)
@@ -152,43 +142,9 @@ class TransferMixIn:
         if count == 0:
             return
 
-        an_errors = []
-        for archive_info in archive_infos:
-            try:
-                archivename_validator(archive_info.name)
-            except argparse.ArgumentTypeError as err:
-                an_errors.append(str(err))
-        if an_errors:
-            an_errors.insert(0, "Invalid archive names detected, please rename them before transfer:")
-            raise Error("\n".join(an_errors))
+        self._validate_archive_metadata(archive_infos, other_manifest)
 
-        ac_errors = []
-        for archive_info in archive_infos:
-            archive = Archive(other_manifest, archive_info.id)
-            try:
-                comment_validator(archive.metadata.get("comment", ""))
-            except argparse.ArgumentTypeError as err:
-                ac_errors.append(f"{archive_info.name}: {err}")
-        if ac_errors:
-            ac_errors.insert(0, "Invalid archive comments detected, please fix them before transfer:")
-            raise Error("\n".join(ac_errors))
-
-        from .. import upgrade as upgrade_mod
-
-        v1_or_v2 = getattr(args, "v1_or_v2", False)
-        upgrader = args.upgrader
-        if upgrader == "NoOp" and v1_or_v2:
-            upgrader = "From12To20"
-
-        try:
-            UpgraderCls = getattr(upgrade_mod, f"Upgrader{upgrader}")
-        except AttributeError:
-            raise Error(f"No such upgrader: {upgrader}")
-
-        if UpgraderCls is not upgrade_mod.UpgraderFrom12To20 and other_manifest.repository.version == 1:
-            raise Error("To transfer from a borg 1.x repo, you need to use: --upgrader=From12To20")
-
-        upgrader = UpgraderCls(cache=cache, args=args)
+        upgrader = self._get_upgrader(args, other_manifest, cache)
 
         for archive_info in archive_infos:
             name, id, ts = archive_info.name, archive_info.id, archive_info.ts
@@ -270,6 +226,59 @@ class TransferMixIn:
                         f"transfer_size: {format_file_size(transfer_size)} "
                         f"present_size: {format_file_size(present_size)}"
                     )
+
+    def _validate_transfer_compatibility(self, manifest, other_manifest):
+        key = manifest.key
+        other_key = other_manifest.key
+        if not uses_same_id_hash(other_key, key):
+            raise Error(
+                "You must keep the same ID hash ([HMAC-]SHA256 or BLAKE2b) or deduplication will break. "
+                "Use a related repository!"
+            )
+        if not uses_same_chunker_secret(other_key, key):
+            raise Error(
+                "You must use the same chunker secret or deduplication will break. " "Use a related repository!"
+            )
+
+    def _validate_archive_metadata(self, archive_infos, other_manifest):
+        an_errors = []
+        for archive_info in archive_infos:
+            try:
+                archivename_validator(archive_info.name)
+            except argparse.ArgumentTypeError as err:
+                an_errors.append(str(err))
+        if an_errors:
+            an_errors.insert(0, "Invalid archive names detected, please rename them before transfer:")
+            raise Error("\n".join(an_errors))
+
+        ac_errors = []
+        for archive_info in archive_infos:
+            archive = Archive(other_manifest, archive_info.id)
+            try:
+                comment_validator(archive.metadata.get("comment", ""))
+            except argparse.ArgumentTypeError as err:
+                ac_errors.append(f"{archive_info.name}: {err}")
+        if ac_errors:
+            ac_errors.insert(0, "Invalid archive comments detected, please fix them before transfer:")
+            raise Error("\n".join(ac_errors))
+
+    def _get_upgrader(self, args, other_manifest, cache):
+        from .. import upgrade as upgrade_mod
+
+        v1_or_v2 = getattr(args, "v1_or_v2", False)
+        upgrader = args.upgrader
+        if upgrader == "NoOp" and v1_or_v2:
+            upgrader = "From12To20"
+
+        try:
+            UpgraderCls = getattr(upgrade_mod, f"Upgrader{upgrader}")
+        except AttributeError:
+            raise Error(f"No such upgrader: {upgrader}")
+
+        if UpgraderCls is not upgrade_mod.UpgraderFrom12To20 and other_manifest.repository.version == 1:
+            raise Error("To transfer from a borg 1.x repo, you need to use: --upgrader=From12To20")
+
+        return UpgraderCls(cache=cache, args=args)
 
     def build_parser_transfer(self, subparsers, common_parser, mid_common_parser):
         from ._common import process_epilog
