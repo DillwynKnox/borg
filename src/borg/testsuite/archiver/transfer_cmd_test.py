@@ -12,6 +12,8 @@ import pytest
 
 from ...constants import *  # NOQA
 from ...helpers import open_item
+import argparse
+from ...helpers import Error
 from ...helpers.time import parse_timestamp
 from ...helpers.parseformat import parse_file_size, ChunkerParams
 from ..platform.platform_test import is_win32
@@ -553,3 +555,104 @@ def test_issue_9022(archivers, request, monkeypatch):
         f"Before: mtime_ns={pre_meta[0]}, size={pre_meta[1]}, inode={pre_meta[2]}\n"
         f"After:  mtime_ns={post_meta[0]}, size={post_meta[1]}, inode={post_meta[2]}"
     )
+
+
+def test_transfer_id_hash_mismatch(archivers, request, monkeypatch):
+    """Test Error: Triggers 'You must keep the same ID hash' branch."""
+    archiver = request.getfixturevalue(archivers)
+    with setup_repos(archiver, monkeypatch) as other_repo1:
+        cmd(archiver, "create", "arch1", "input")
+
+    # Mocking the specific helper used in do_transfer to simulate a hash mismatch
+    import borg.archiver.transfer_cmd
+
+    monkeypatch.setattr(borg.archiver.transfer_cmd, "uses_same_id_hash", lambda k1, k2: False)
+
+    with pytest.raises(Error, match="must keep the same ID hash"):
+        cmd(archiver, "transfer", other_repo1)
+
+
+def test_transfer_invalid_archive_names(archivers, request, monkeypatch):
+    """Test Error: Triggers 'Invalid archive names detected' branch."""
+    archiver = request.getfixturevalue(archivers)
+    with setup_repos(archiver, monkeypatch) as other_repo1:
+        create_test_files(archiver.input_path)
+        cmd(archiver, "create", "valid-name", "input")
+
+    # Mock the validator inside the transfer module to raise ArgumentTypeError
+    import borg.archiver.transfer_cmd
+
+    def mock_validator(name):
+        raise argparse.ArgumentTypeError(f"Name '{name}' is forbidden")
+
+    monkeypatch.setattr(borg.archiver.transfer_cmd, "archivename_validator", mock_validator)
+
+    with pytest.raises(Error, match="Invalid archive names detected"):
+        cmd(archiver, "transfer", other_repo1)
+
+
+def test_transfer_skips_part_files_branch(archivers, request, monkeypatch):
+    """Test branch: Triggers the 'continue' branch for legacy checkpoint 'part' files."""
+    archiver = request.getfixturevalue(archivers)
+    with setup_repos(archiver, monkeypatch) as other_repo1:
+        create_test_files(archiver.input_path)
+        cmd(archiver, "create", "arch1", "input")
+
+    # Hook into Archive.iter_items to inject a "part" flag into every item metadata
+    from ...archive import Archive
+
+    original_iter = Archive.iter_items
+
+    def mocked_iter(self):
+        for item in original_iter(self):
+            # Injecting the legacy Borg 1.x 'part' key
+            item.part = 1
+            yield item
+
+    monkeypatch.setattr(Archive, "iter_items", mocked_iter)
+
+    # The transfer should finish but show 0 bytes transferred because all items were skipped
+    output = cmd(archiver, "transfer", other_repo1)
+    assert "transfer_size: 0 B" in output
+
+
+from borg.item import Item
+
+
+def test_transfer_skips_legacy_parts(archivers, request, monkeypatch):
+    archiver = request.getfixturevalue(archivers)
+
+    with setup_repos(archiver, monkeypatch) as other_repo1:
+        create_test_files(archiver.input_path)
+        cmd(archiver, "create", "arch1", "input")
+
+    from borg.archive import Archive
+
+    original_iter = Archive.iter_items
+
+    def mocked_iter(self):
+        # original_iter returns a generator of Item objects
+        for item in original_iter(self):
+            yield item  # Yield the real file
+
+            # 1. Trigger Lines 170-171 (The 'part' skip)
+            # Create a new Item with the same underlying data + 'part' key
+            part_item = Item(internal_dict=item.as_dict())
+            part_item.part = 1
+            yield part_item
+
+            # 2. Trigger Lines 173-174 (The 'chunks_healthy' branch)
+            # Move 'chunks' to 'chunks_healthy'
+            healthy_item = Item(internal_dict=item.as_dict())
+            if "chunks" in healthy_item:
+                healthy_item.chunks_healthy = healthy_item.chunks
+                del healthy_item.chunks
+            yield healthy_item
+
+    monkeypatch.setattr(Archive, "iter_items", mocked_iter)
+
+    # Run the transfer
+    cmd(archiver, "transfer", other_repo1)
+
+    # Verification
+    assert "arch1" in cmd(archiver, "repo-list")
