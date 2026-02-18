@@ -289,8 +289,6 @@ class TransferMixIn:
                 # Also useful for Borg 2 -> 2 transfers with metadata changes (ID changes).
                 mark("DT_11_true")
                 print(f"{name} {ts_str}: archive is already present in destination repo, skipping.")
-            # Useful for Borg 1.x -> 2 transfers; we have unique names in Borg 1.x.
-            # Also useful for Borg 2 -> 2 transfers with metadata changes (ID changes).
             elif not dry_run and manifest.archives.exists_name_and_id(name, id):
                 # Useful for Borg 2 -> 2 transfers without changes (ID stays the same)
                 mark("DT_12_true")
