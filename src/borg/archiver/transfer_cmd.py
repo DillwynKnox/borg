@@ -15,6 +15,7 @@ from ..manifest import Manifest
 from ..legacyrepository import LegacyRepository
 from ..repository import Repository
 
+from ..helpers.coverage_diy import mark, register
 from ..logger import create_logger
 
 logger = create_logger()
@@ -140,65 +141,111 @@ class TransferMixIn:
         key = manifest.key
         other_key = other_manifest.key
 
+        ALL_TRANSFER_BRANCHES = {
+            "DT_1_true",
+            "DT_1_false",
+            "DT_2_true",
+            "DT_2_false",
+            "DT_3_true",
+            "DT_3_false",
+            "DT_4_true",
+            "DT_4_false",
+            "DT_5_true",
+            "DT_5_false",
+            "DT_6_true",
+            "DT_6_false",
+            "DT_7_true",
+            "DT_7_false",
+            "DT_8_true",
+            "DT_8_false",
+            "DT_9_true",
+            "DT_9_false",
+            "DT_10_true",
+            "DT_10_false",
+            "DT_11_true",
+            "DT_12_true",
+            "DT_13_true",
+            "DT_14_true",
+            "DT_14_false",
+            "DT_15_true",
+            "DT_15_false",
+            "DT_16_true",
+            "DT_16_elif",
+            "DT_16_false",
+            "DT_17_true",
+            "DT_17_false",
+            "DT_18_true",
+            "DT_18_false",
+            "DT_19_true",
+            "DT_19_false",
+            "DT_20_true",
+            "DT_20_false",
+            "DT_21_true",
+            "DT_21_false",
+        }
+
+        for flag in ALL_TRANSFER_BRANCHES:
+            register(flag)
+
         if not uses_same_id_hash(other_key, key):
-            BRANCHES_TAKEN.add("1_true")
+            mark("DT_1_true")
             raise Error(
                 "You must keep the same ID hash ([HMAC-]SHA256 or BLAKE2b) or deduplication will break. "
                 "Use a related repository!"
             )
         else:
-            BRANCHES_TAKEN.add("1_false")
+            mark("DT_1_false")
 
         if not uses_same_chunker_secret(other_key, key):
-            BRANCHES_TAKEN.add("2_true")
+            mark("DT_2_true")
             raise Error(
                 "You must use the same chunker secret or deduplication will break. " "Use a related repository!"
             )
         else:
-            BRANCHES_TAKEN.add("2_false")
+            mark("DT_2_false")
 
         dry_run = args.dry_run
         archive_infos = other_manifest.archives.list_considering(args)
         count = len(archive_infos)
 
         if count == 0:
-            BRANCHES_TAKEN.add("3_true")
+            mark("DT_3_true")
             return
         else:
-            BRANCHES_TAKEN.add("3_false")
+            mark("DT_3_false")
 
         an_errors = []
         for archive_info in archive_infos:
             try:
                 archivename_validator(archive_info.name)
-                BRANCHES_TAKEN.add("4_false")  # no exception
+                mark("DT_4_false")  # no exception
             except argparse.ArgumentTypeError as err:
-                BRANCHES_TAKEN.add("4_true")  # exception raised
+                mark("DT_4_true")  # exception raised
                 an_errors.append(str(err))
 
         if an_errors:
-            BRANCHES_TAKEN.add("5_true")
+            mark("DT_5_true")
             an_errors.insert(0, "Invalid archive names detected, please rename them before transfer:")
             raise Error("\n".join(an_errors))
         else:
-            BRANCHES_TAKEN.add("5_false")
+            mark("DT_5_false")
 
         ac_errors = []
         for archive_info in archive_infos:
             archive = Archive(other_manifest, archive_info.id)
             try:
                 comment_validator(archive.metadata.get("comment", ""))
-                BRANCHES_TAKEN.add("6_false")  # no exception
+                mark("DT_6_false")  # no exception
             except argparse.ArgumentTypeError as err:
-                BRANCHES_TAKEN.add("6_true")  # exception raised
+                mark("DT_6_true")  # exception raised
                 ac_errors.append(f"{archive_info.name}: {err}")
 
         if ac_errors:
-            BRANCHES_TAKEN.add("7_true")
+            mark("DT_7_true")
             ac_errors.insert(0, "Invalid archive comments detected, please fix them before transfer:")
             raise Error("\n".join(ac_errors))
         else:
-            BRANCHES_TAKEN.add("7_false")
+            mark("DT_7_false")
 
         from .. import upgrade as upgrade_mod
 
@@ -206,23 +253,23 @@ class TransferMixIn:
         upgrader = args.upgrader
 
         if upgrader == "NoOp" and v1_or_v2:
-            BRANCHES_TAKEN.add("8_true")
+            mark("DT_8_true")
             upgrader = "From12To20"
         else:
-            BRANCHES_TAKEN.add("8_false")
+            mark("DT_8_false")
 
         try:
             UpgraderCls = getattr(upgrade_mod, f"Upgrader{upgrader}")
-            BRANCHES_TAKEN.add("9_false")  # no exception
+            mark("DT_9_false")  # no exception
         except AttributeError:
-            BRANCHES_TAKEN.add("9_true")  # exception raised
+            mark("DT_9_true")  # exception raised
             raise Error(f"No such upgrader: {upgrader}")
 
         if UpgraderCls is not upgrade_mod.UpgraderFrom12To20 and other_manifest.repository.version == 1:
-            BRANCHES_TAKEN.add("10_true")
+            mark("DT_10_true")
             raise Error("To transfer from a borg 1.x repo, you need to use: --upgrader=From12To20")
         else:
-            BRANCHES_TAKEN.add("10_false")
+            mark("DT_10_false")
 
         upgrader = UpgraderCls(cache=cache, args=args)
 
@@ -233,19 +280,19 @@ class TransferMixIn:
             present_size = 0
 
             if not dry_run and manifest.archives.exists_name_and_ts(name, archive_info.ts):
-                BRANCHES_TAKEN.add("11_true")
+                mark("DT_11_true")
                 print(f"{name} {ts_str}: archive is already present in destination repo, skipping.")
             elif not dry_run and manifest.archives.exists_name_and_id(name, id):
-                BRANCHES_TAKEN.add("12_true")
+                mark("DT_12_true")
                 print(f"{name} {id_hex}: archive is already present in destination repo, skipping.")
             else:
-                BRANCHES_TAKEN.add("13_true")  # actual transfer path
+                mark("DT_13_true")  # actual transfer path
 
                 if not dry_run:
-                    BRANCHES_TAKEN.add("14_true")
+                    mark("DT_14_true")
                     print(f"{name} {ts_str} {id_hex}: copying archive to destination repo...")
                 else:
-                    BRANCHES_TAKEN.add("14_false")
+                    mark("DT_14_false")
 
                 other_archive = Archive(other_manifest, id)
                 archive = (
@@ -256,23 +303,23 @@ class TransferMixIn:
                 for item in other_archive.iter_items():
                     is_part = bool(item.get("part", False))
                     if is_part:
-                        BRANCHES_TAKEN.add("15_true")
+                        mark("DT_15_true")
                         continue
                     else:
-                        BRANCHES_TAKEN.add("15_false")
+                        mark("DT_15_false")
 
                     if "chunks_healthy" in item:
-                        BRANCHES_TAKEN.add("16_true")
+                        mark("DT_16_true")
                         other_chunks = item.chunks_healthy
                     elif "chunks" in item:
-                        BRANCHES_TAKEN.add("16_elif")
+                        mark("DT_16_elif")
                         other_chunks = item.chunks
                     else:
-                        BRANCHES_TAKEN.add("16_false")
+                        mark("DT_16_false")
                         other_chunks = None
 
                     if other_chunks is not None:
-                        BRANCHES_TAKEN.add("17_true")
+                        mark("DT_17_true")
                         chunks, transfer, present = transfer_chunks(
                             upgrader,
                             other_repository,
@@ -286,30 +333,30 @@ class TransferMixIn:
                             args.chunker_params,
                         )
                         if not dry_run:
-                            BRANCHES_TAKEN.add("18_true")
+                            mark("DT_18_true")
                             item.chunks = chunks
                             archive.stats.nfiles += 1
                         else:
-                            BRANCHES_TAKEN.add("18_false")
+                            mark("DT_18_false")
                         transfer_size += transfer
                         present_size += present
                     else:
-                        BRANCHES_TAKEN.add("17_false")
+                        mark("DT_17_false")
 
                     if not dry_run:
-                        BRANCHES_TAKEN.add("19_true")
+                        mark("DT_19_true")
                         item = upgrader.upgrade_item(item=item)
                         archive.add_item(item, show_progress=args.progress)
                     else:
-                        BRANCHES_TAKEN.add("19_false")
+                        mark("DT_19_false")
 
                 if not dry_run:
-                    BRANCHES_TAKEN.add("20_true")
+                    mark("DT_20_true")
                     if args.progress:
-                        BRANCHES_TAKEN.add("21_true")
+                        mark("DT_21_true")
                         archive.stats.show_progress(final=True)
                     else:
-                        BRANCHES_TAKEN.add("21_false")
+                        mark("DT_21_false")
                     additional_metadata = upgrader.upgrade_archive_metadata(metadata=other_archive.metadata)
                     archive.save(additional_metadata=additional_metadata)
                     print(
@@ -318,7 +365,7 @@ class TransferMixIn:
                         f"present_size: {format_file_size(present_size)}"
                     )
                 else:
-                    BRANCHES_TAKEN.add("20_false")
+                    mark("DT_20_false")
                     print(
                         f"{name} {ts_str} {id_hex}: completed"
                         if transfer_size == 0
