@@ -129,6 +129,7 @@ def transfer_chunks(
 
     return chunks, transfer, present
 
+
 class TransferMixIn:
     @with_other_repository(manifest=True, compatibility=(Manifest.Operation.READ,))
     @with_repository(manifest=True, cache=True, compatibility=(Manifest.Operation.WRITE,))
