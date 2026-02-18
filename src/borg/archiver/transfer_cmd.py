@@ -129,6 +129,9 @@ def transfer_chunks(
     return chunks, transfer, present
 
 
+BRANCHES_TAKEN = set()
+
+
 class TransferMixIn:
     @with_other_repository(manifest=True, compatibility=(Manifest.Operation.READ,))
     @with_repository(manifest=True, cache=True, compatibility=(Manifest.Operation.WRITE,))
@@ -136,57 +139,90 @@ class TransferMixIn:
         """archives transfer from other repository, optionally upgrade data format"""
         key = manifest.key
         other_key = other_manifest.key
+
         if not uses_same_id_hash(other_key, key):
+            BRANCHES_TAKEN.add("1_true")
             raise Error(
                 "You must keep the same ID hash ([HMAC-]SHA256 or BLAKE2b) or deduplication will break. "
                 "Use a related repository!"
             )
+        else:
+            BRANCHES_TAKEN.add("1_false")
+
         if not uses_same_chunker_secret(other_key, key):
+            BRANCHES_TAKEN.add("2_true")
             raise Error(
                 "You must use the same chunker secret or deduplication will break. " "Use a related repository!"
             )
+        else:
+            BRANCHES_TAKEN.add("2_false")
 
         dry_run = args.dry_run
         archive_infos = other_manifest.archives.list_considering(args)
         count = len(archive_infos)
+
         if count == 0:
+            BRANCHES_TAKEN.add("3_true")
             return
+        else:
+            BRANCHES_TAKEN.add("3_false")
 
         an_errors = []
         for archive_info in archive_infos:
             try:
                 archivename_validator(archive_info.name)
+                BRANCHES_TAKEN.add("4_false")  # no exception
             except argparse.ArgumentTypeError as err:
+                BRANCHES_TAKEN.add("4_true")  # exception raised
                 an_errors.append(str(err))
+
         if an_errors:
+            BRANCHES_TAKEN.add("5_true")
             an_errors.insert(0, "Invalid archive names detected, please rename them before transfer:")
             raise Error("\n".join(an_errors))
+        else:
+            BRANCHES_TAKEN.add("5_false")
 
         ac_errors = []
         for archive_info in archive_infos:
             archive = Archive(other_manifest, archive_info.id)
             try:
                 comment_validator(archive.metadata.get("comment", ""))
+                BRANCHES_TAKEN.add("6_false")  # no exception
             except argparse.ArgumentTypeError as err:
+                BRANCHES_TAKEN.add("6_true")  # exception raised
                 ac_errors.append(f"{archive_info.name}: {err}")
+
         if ac_errors:
+            BRANCHES_TAKEN.add("7_true")
             ac_errors.insert(0, "Invalid archive comments detected, please fix them before transfer:")
             raise Error("\n".join(ac_errors))
+        else:
+            BRANCHES_TAKEN.add("7_false")
 
         from .. import upgrade as upgrade_mod
 
         v1_or_v2 = getattr(args, "v1_or_v2", False)
         upgrader = args.upgrader
+
         if upgrader == "NoOp" and v1_or_v2:
+            BRANCHES_TAKEN.add("8_true")
             upgrader = "From12To20"
+        else:
+            BRANCHES_TAKEN.add("8_false")
 
         try:
             UpgraderCls = getattr(upgrade_mod, f"Upgrader{upgrader}")
+            BRANCHES_TAKEN.add("9_false")  # no exception
         except AttributeError:
+            BRANCHES_TAKEN.add("9_true")  # exception raised
             raise Error(f"No such upgrader: {upgrader}")
 
         if UpgraderCls is not upgrade_mod.UpgraderFrom12To20 and other_manifest.repository.version == 1:
+            BRANCHES_TAKEN.add("10_true")
             raise Error("To transfer from a borg 1.x repo, you need to use: --upgrader=From12To20")
+        else:
+            BRANCHES_TAKEN.add("10_false")
 
         upgrader = UpgraderCls(cache=cache, args=args)
 
@@ -195,43 +231,48 @@ class TransferMixIn:
             id_hex, ts_str = bin_to_hex(id), ts.isoformat()
             transfer_size = 0
             present_size = 0
-            # At least for Borg 1.x -> Borg 2 transfers, we cannot use the ID to check for
-            # already transferred archives (due to upgrade of the metadata stream, the ID will be
-            # different anyway). So we use the archive name and timestamp.
-            # The name alone might be sufficient for Borg 1.x -> 2 transfers, but it isn't
-            # for 2 -> 2 transfers, because Borg 2 allows duplicate names ("series" feature).
-            # So, the best is to check for both name/ts and name/id.
+
             if not dry_run and manifest.archives.exists_name_and_ts(name, archive_info.ts):
-                # Useful for Borg 1.x -> 2 transfers; we have unique names in Borg 1.x.
-                # Also useful for Borg 2 -> 2 transfers with metadata changes (ID changes).
+                BRANCHES_TAKEN.add("11_true")
                 print(f"{name} {ts_str}: archive is already present in destination repo, skipping.")
             elif not dry_run and manifest.archives.exists_name_and_id(name, id):
-                # Useful for Borg 2 -> 2 transfers without changes (ID stays the same)
+                BRANCHES_TAKEN.add("12_true")
                 print(f"{name} {id_hex}: archive is already present in destination repo, skipping.")
             else:
+                BRANCHES_TAKEN.add("13_true")  # actual transfer path
+
                 if not dry_run:
+                    BRANCHES_TAKEN.add("14_true")
                     print(f"{name} {ts_str} {id_hex}: copying archive to destination repo...")
+                else:
+                    BRANCHES_TAKEN.add("14_false")
+
                 other_archive = Archive(other_manifest, id)
                 archive = (
                     Archive(manifest, name, cache=cache, create=True, progress=args.progress) if not dry_run else None
                 )
                 upgrader.new_archive(archive=archive)
+
                 for item in other_archive.iter_items():
                     is_part = bool(item.get("part", False))
                     if is_part:
-                        # Borg 1.x created part files while checkpointing (in addition to the full
-                        # file in the final archive), like <filename>.borg_part_<part> with item.part >= 1.
-                        # Borg 2 archives do not have such special part items anymore.
-                        # So let's remove them from old archives also, considering there is no
-                        # code anymore that deals with them in special ways (e.g., to get stats right).
+                        BRANCHES_TAKEN.add("15_true")
                         continue
-                    if "chunks_healthy" in item:  # legacy
-                        other_chunks = item.chunks_healthy  # chunks_healthy has the CORRECT chunks list, if present.
+                    else:
+                        BRANCHES_TAKEN.add("15_false")
+
+                    if "chunks_healthy" in item:
+                        BRANCHES_TAKEN.add("16_true")
+                        other_chunks = item.chunks_healthy
                     elif "chunks" in item:
+                        BRANCHES_TAKEN.add("16_elif")
                         other_chunks = item.chunks
                     else:
+                        BRANCHES_TAKEN.add("16_false")
                         other_chunks = None
+
                     if other_chunks is not None:
+                        BRANCHES_TAKEN.add("17_true")
                         chunks, transfer, present = transfer_chunks(
                             upgrader,
                             other_repository,
@@ -245,16 +286,30 @@ class TransferMixIn:
                             args.chunker_params,
                         )
                         if not dry_run:
+                            BRANCHES_TAKEN.add("18_true")
                             item.chunks = chunks
                             archive.stats.nfiles += 1
+                        else:
+                            BRANCHES_TAKEN.add("18_false")
                         transfer_size += transfer
                         present_size += present
+                    else:
+                        BRANCHES_TAKEN.add("17_false")
+
                     if not dry_run:
+                        BRANCHES_TAKEN.add("19_true")
                         item = upgrader.upgrade_item(item=item)
                         archive.add_item(item, show_progress=args.progress)
+                    else:
+                        BRANCHES_TAKEN.add("19_false")
+
                 if not dry_run:
+                    BRANCHES_TAKEN.add("20_true")
                     if args.progress:
+                        BRANCHES_TAKEN.add("21_true")
                         archive.stats.show_progress(final=True)
+                    else:
+                        BRANCHES_TAKEN.add("21_false")
                     additional_metadata = upgrader.upgrade_archive_metadata(metadata=other_archive.metadata)
                     archive.save(additional_metadata=additional_metadata)
                     print(
@@ -263,6 +318,7 @@ class TransferMixIn:
                         f"present_size: {format_file_size(present_size)}"
                     )
                 else:
+                    BRANCHES_TAKEN.add("20_false")
                     print(
                         f"{name} {ts_str} {id_hex}: completed"
                         if transfer_size == 0
