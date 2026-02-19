@@ -2,10 +2,8 @@ import pytest
 import time
 import types
 from unittest.mock import MagicMock
-# Importamos el módulo donde está la lógica original
 import borg.repository 
 
-# 1. Definimos los Mocks que el código necesita para no romperse
 class MockRepoObj:
     class ObjHeader:
         def __init__(self, *args):
@@ -15,12 +13,10 @@ class MockRepoObj:
             self.data_hash = b'hash'
     obj_header = MagicMock()
     obj_header.size = 8
-    # Esto simula el unpack de struct para obtener meta_size, data_size, etc.
     obj_header.unpack = MagicMock(return_value=(0, 0, b'hash', b'hash'))
 
 def mock_xxh64(data): return b'hash'
 
-# 2. FakeStore para simular la base de datos de Borg
 class FakeStore:
     def __init__(self, objects=None):
         self.objects = objects or {}
@@ -44,33 +40,79 @@ class FakeStore:
     def store(self, key, value):
         self.stored[key] = value
 
-# --- EL TEST CORREGIDO ---
+
 
 def test_check_repair_deletes_corrupt_object(caplog, monkeypatch):
-    # Usamos monkeypatch.setattr para inyectar los mocks en el módulo correcto
     monkeypatch.setattr(borg.repository, "RepoObj", MockRepoObj)
     monkeypatch.setattr(borg.repository, "xxh64", mock_xxh64)
-    # Mockeamos el logger para que no intente escribir en archivos reales
     mock_logger = MagicMock()
     monkeypatch.setattr(borg.repository, "logger", mock_logger)
     
-    # Preparamos el Store con un objeto que fallará (demasiado pequeño)
     good_id = "0" * 64 
-    store = FakeStore(objects={f"data/{good_id}": b"fail"}) # < 8 bytes (hdr_size)
+    store = FakeStore(objects={f"data/{good_id}": b"fail"})
     
-    # Instanciamos el repositorio real o un mock con el método real
     repo = MagicMock(spec=borg.repository.Repository)
     repo.store = store
-    # Forzamos el uso de la función original en nuestro mock
     repo.check = borg.repository.Repository.check.__get__(repo, borg.repository.Repository)
     repo._lock_refresh = MagicMock()
 
-    # Ejecución
     with caplog.at_level("INFO"):
-        # Importante: repair=True, max_duration=0 para evitar el conflicto del assert
         ok = repo.check(repair=True, max_duration=0)
 
-    # Verificaciones
     assert ok is True
     assert f"data/{good_id}" in store.deleted
     mock_logger.error.assert_any_call(f"Repo object {good_id} is corrupted: too small.")
+
+
+def test_check_stops_after_timeout(monkeypatch):
+    monkeypatch.setattr(borg.repository, "RepoObj", MockRepoObj)
+    monkeypatch.setattr(borg.repository, "xxh64", mock_xxh64)
+    
+    objects = {f"data/{str(i).zfill(64)}": b"valid_data_hdr" for i in range(10)}
+    store = FakeStore(objects=objects)
+    
+    repo = MagicMock(spec=borg.repository.Repository)
+    repo.store = store
+    repo.check = borg.repository.Repository.check.__get__(repo, borg.repository.Repository)
+    repo._lock_refresh = MagicMock()
+
+    with monkeypatch.context() as m:
+        m.setattr(time, "time", MagicMock(side_effect=[100.0, 200.0, 200.0, 200.0, 200.0]))
+        repo.check(repair=False, max_duration=0.1)
+
+
+def test_check_repair_deletes_invalid_hash(monkeypatch):
+    monkeypatch.setattr(borg.repository, "RepoObj", MockRepoObj)
+    monkeypatch.setattr(borg.repository, "xxh64", lambda x: b'definitely_not_the_mock_hash')
+    mock_logger = MagicMock()
+    monkeypatch.setattr(borg.repository, "logger", mock_logger)
+    
+    obj_id = "1" * 64
+    store = FakeStore(objects={f"data/{obj_id}": b"1234567890"})
+    
+    repo = MagicMock(spec=borg.repository.Repository)
+    repo.store = store
+    repo.check = borg.repository.Repository.check.__get__(repo, borg.repository.Repository)
+    repo._lock_refresh = MagicMock()
+
+    repo.check(repair=True, max_duration=0)
+
+    assert f"data/{obj_id}" in store.deleted
+    error_msgs = [call.args[0] for call in mock_logger.error.call_args_list]
+    assert any("reloading did not help, deleting it!" in msg for msg in error_msgs)
+
+def test_check_empty_repository(monkeypatch):
+    monkeypatch.setattr(borg.repository, "RepoObj", MockRepoObj)
+    store = FakeStore(objects={}) 
+    
+    repo = MagicMock(spec=borg.repository.Repository)
+    repo.store = store
+    repo.check = borg.repository.Repository.check.__get__(repo, borg.repository.Repository)
+    repo._lock_refresh = MagicMock()
+
+    ok = repo.check(repair=True)
+
+    assert ok is True
+   
+    deleted_data = [k for k in store.deleted if k.startswith('data/')]
+    assert len(deleted_data) == 0
