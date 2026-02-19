@@ -611,6 +611,7 @@ def test_eval_escapes():
         ("10,23,16,4095", ("buzhash", 10, 23, 16, 4095)),
         ("fixed,4096", ("fixed", 4096, 0)),
         ("fixed,4096,200", ("fixed", 4096, 200)),
+        ("fail,4096,bitmap", ("fail", 4096, "bitmap")),
     ],
 )
 def test_valid_chunkerparams(chunker_params, expected_return):
@@ -628,6 +629,11 @@ def test_valid_chunkerparams(chunker_params, expected_return):
         "fixed,63",  # too small block size
         "fixed,%d,%d" % (MAX_DATA_SIZE + 1, 4096),  # too big block size
         "fixed,%d,%d" % (4096, MAX_DATA_SIZE + 1),  # too big header size
+        # added tests 
+        "",  # count == 0  -> CP_01_T_count0 (no chunker params given)
+        "buzhash64,5,6,5,17",    # chunk_min < 6  -> CP_10_T_min_lt6
+        "buzhash64,6,24,6,17",   # chunk_max > 23 -> CP_11_T_max_gt23
+        "buzhash64,10,12,9,17",  # violates min <= mask <= max -> CP_09_T_mask_range (optional but good)
     ],
 )
 def test_invalid_chunkerparams(invalid_chunker_params):
