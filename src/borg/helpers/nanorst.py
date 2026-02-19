@@ -2,6 +2,8 @@ import io
 import sys
 
 from . import is_terminal
+from borg.helpers.coverage_diy import register
+from borg.helpers.coverage_diy import mark
 
 coverage_hits = {i: False for i in range(1, 26)}
 
@@ -50,13 +52,56 @@ def process_directive(directive, arguments, out, state_hook):
 
 
 def rst_to_text(text, state_hook=None, references=None):
-    """
-    Convert rST to a more human-friendly text form.
+    CP_BRANCHES = [
+        "RST_01_T_eof_break",
+        "RST_01_F_eof_break",
+        "RST_02_T_state_text",
+        "RST_02_F_state_text",
+        "RST_03_T_escape_inline",
+        "RST_03_F_escape_inline",
+        "RST_04_T_prev_not_backslash",
+        "RST_04_F_prev_not_backslash",
+        "RST_05_T_enter_inline_single",
+        "RST_05_F_enter_inline_single",
+        "RST_06_T_enter_bold",
+        "RST_06_F_enter_bold",
+        "RST_07_T_enter_dbltick",
+        "RST_07_F_enter_dbltick",
+        "RST_08_T_ref_translate",
+        "RST_08_F_ref_translate",
+        "RST_09_T_ref_endtick",
+        "RST_09_F_ref_endtick",
+        "RST_10_T_ref_newline_skip",
+        "RST_10_F_ref_newline_skip",
+        "RST_11_T_ref_defined",
+        "RST_11_F_ref_undefined",
+        "RST_12_T_codeblock_start",
+        "RST_12_F_codeblock_start",
+        "RST_13_T_directive_start",
+        "RST_13_F_directive_start",
+        "RST_14_T_is_directive",
+        "RST_14_F_is_directive",
+        "RST_15_T_inline_fill",
+        "RST_15_F_inline_fill",
+        "RST_16_T_inline_replace",
+        "RST_16_F_inline_replace",
+        "RST_17_process_directive",
+        "RST_18_T_close_inline_single",
+        "RST_18_F_close_inline_single",
+        "RST_19_T_fill_2spaces",
+        "RST_19_F_fill_2spaces",
+        "RST_20_T_close_dbltick",
+        "RST_20_F_close_dbltick",
+        "RST_21_T_fill_4spaces",
+        "RST_21_F_fill_4spaces",
+        "RST_22_T_close_bold",
+        "RST_22_F_close_bold",
+        "RST_23_T_codeblock_end",
+        "RST_23_F_codeblock_end",
+    ]
+    for bid in CP_BRANCHES:
+        register(bid)
 
-    This is a very loose conversion. No advanced rST features are supported.
-    The generated output depends directly on the input (for example, the
-    indentation of admonitions).
-    """
     state_hook = state_hook or (lambda old_state, new_state, out: None)
     references = references or {}
     state = "text"
@@ -67,131 +112,180 @@ def rst_to_text(text, state_hook=None, references=None):
     inline_single = ("*", "`")
 
     while True:
-        coverage_hits[1] = True
         char = text.read(1)
         if not char:
-            coverage_hits[2] = True
+            mark("RST_01_T_eof_break")
             break
         else:
-            coverage_hits[3] = True
+            mark("RST_01_F_eof_break")
+
         next = text.peek(1)  # type: str
 
         if state == "text":
-            coverage_hits[4] = True
+            mark("RST_02_T_state_text")
+
             if char == "\\" and text.peek(1) in inline_single:
-                coverage_hits[6] = True
+                mark("RST_03_T_escape_inline")
                 continue
             else:
-                coverage_hits[7] = True
+                mark("RST_03_F_escape_inline")
+
             if text.peek(-1) != "\\":
-                coverage_hits[8] = True
+                mark("RST_04_T_prev_not_backslash")
+
                 if char in inline_single and next != char:
-                    coverage_hits[10] = True
+                    mark("RST_05_T_enter_inline_single")
                     state_hook(state, char, out)
                     state = char
                     continue
+                else:
+                    mark("RST_05_F_enter_inline_single")
+
                 if char == next == "*":
-                    coverage_hits[11] = True
+                    mark("RST_06_T_enter_bold")
                     state_hook(state, "**", out)
                     state = "**"
                     text.read(1)
                     continue
+                else:
+                    mark("RST_06_F_enter_bold")
+
                 if char == next == "`":
-                    coverage_hits[12] = True
+                    mark("RST_07_T_enter_dbltick")
                     state_hook(state, "``", out)
                     state = "``"
                     text.read(1)
                     continue
+                else:
+                    mark("RST_07_F_enter_dbltick")
+
                 if text.peek(-1).isspace() and char == ":" and text.peek(5) == "ref:`":
-                    coverage_hits[13] = True
-                    # translate reference
+                    mark("RST_08_T_ref_translate")
                     text.read(5)
                     ref = ""
                     while True:
-                        coverage_hits[14] = True
-                        char = text.peek(1)
-                        if char == "`":
-                            coverage_hits[15] = True
+                        char2 = text.peek(1)
+                        if char2 == "`":
+                            mark("RST_09_T_ref_endtick")
                             text.read(1)
                             break
-                        if char == "\n":
-                            coverage_hits[16] = True
+                        else:
+                            mark("RST_09_F_ref_endtick")
+
+                        if char2 == "\n":
+                            mark("RST_10_T_ref_newline_skip")
                             text.read(1)
-                            continue  # merge line breaks in :ref:`...\n...`
+                            continue
+                        else:
+                            mark("RST_10_F_ref_newline_skip")
+
                         ref += text.read(1)
+
                     try:
-                        coverage_hits[17] = True
                         out.write(references[ref])
+                        mark("RST_11_T_ref_defined")
                     except KeyError:
-                        coverage_hits[18] = True
+                        mark("RST_11_F_ref_undefined")
                         raise ValueError(
                             "Undefined reference in Archiver help: %r — please add reference "
                             "substitution to 'rst_plain_text_references'" % ref
                         )
                     continue
-                if char == ":" and text.peek(2) == ":\n":  # End of line code block
-                    coverage_hits[19] = True
+                else:
+                    mark("RST_08_F_ref_translate")
+
+                if char == ":" and text.peek(2) == ":\n":
+                    mark("RST_12_T_codeblock_start")
                     text.read(2)
                     state_hook(state, "code-block", out)
                     state = "code-block"
                     out.write(":\n")
                     continue
+                else:
+                    mark("RST_12_F_codeblock_start")
             else:
-                coverage_hits[9] = True
+                mark("RST_04_F_prev_not_backslash")
 
             if text.peek(-2) in ("\n\n", "") and char == next == ".":
-                coverage_hits[20] = True
+                mark("RST_13_T_directive_start")
                 text.read(2)
                 directive, is_directive, arguments = text.readline().partition("::")
                 text.read(1)
+
                 if not is_directive:
-                    coverage_hits[21] = True
-                    # partition: if the separator is not in the text, the leftmost output is the entire input
+                    mark("RST_14_F_is_directive")
                     if directive == "nanorst: inline-fill":
+                        mark("RST_15_T_inline_fill")
                         inline_mode = "fill"
-                    elif directive == "nanorst: inline-replace":
+                    else:
+                        mark("RST_15_F_inline_fill")
+
+                    if directive == "nanorst: inline-replace":
+                        mark("RST_16_T_inline_replace")
                         inline_mode = "replace"
+                    else:
+                        mark("RST_16_F_inline_replace")
+
                     continue
-                process_directive(directive, arguments.strip(), out, state_hook)
-                continue
+                else:
+                    mark("RST_14_T_is_directive")
+                    mark("RST_17_process_directive")
+                    process_directive(directive, arguments.strip(), out, state_hook)
+                    continue
+            else:
+                mark("RST_13_F_directive_start")
+
         else:
-            coverage_hits[5] = True
+            mark("RST_02_F_state_text")
+
         if state in inline_single and char == state:
-            coverage_hits[22] = True
+            mark("RST_18_T_close_inline_single")
             state_hook(state, "text", out)
             state = "text"
             if inline_mode == "fill":
+                mark("RST_19_T_fill_2spaces")
                 out.write(2 * " ")
+            else:
+                mark("RST_19_F_fill_2spaces")
             continue
+        else:
+            mark("RST_18_F_close_inline_single")
+
         if state == "``" and char == next == "`":
-            coverage_hits[23] = True
+            mark("RST_20_T_close_dbltick")
             state_hook(state, "text", out)
             state = "text"
             text.read(1)
             if inline_mode == "fill":
+                mark("RST_21_T_fill_4spaces")
                 out.write(4 * " ")
+            else:
+                mark("RST_21_F_fill_4spaces")
             continue
+        else:
+            mark("RST_20_F_close_dbltick")
+
         if state == "**" and char == next == "*":
-            coverage_hits[24] = True
+            mark("RST_22_T_close_bold")
             state_hook(state, "text", out)
             state = "text"
             text.read(1)
             continue
+        else:
+            mark("RST_22_F_close_bold")
+
         if state == "code-block" and char == next == "\n" and text.peek(5)[1:] != "    ":
-            coverage_hits[25] = True
-            # Foo::
-            #
-            #     *stuff* *code* *ignore .. all markup*
-            #
-            #     More arcane stuff
-            #
-            # Regular text...
+            mark("RST_23_T_codeblock_end")
             state_hook(state, "text", out)
             state = "text"
+        else:
+            mark("RST_23_F_codeblock_end")
+
         out.write(char)
 
     assert state == "text", "Invalid final state %r (This usually indicates unmatched */**)" % state
     return out.getvalue()
+
 
 
 class RstToTextLazy:
